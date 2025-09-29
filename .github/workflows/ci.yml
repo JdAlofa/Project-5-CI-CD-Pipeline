@@ -60,6 +60,16 @@ jobs:
       run: npm run test -- --no-watch --no-progress --browsers=ChromeHeadless --code-coverage
       working-directory: ./front
 
+    - name: Enforce minimum coverage
+      run: |
+        COVERAGE=$(cat coverage/bobapp/coverage-summary.json | grep -o '"lines":{"pct":[^,]*' | grep -o '[0-9.]*')
+        echo "Current coverage is ${COVERAGE}%"
+        if (( $(echo "$COVERAGE < 75" | bc -l) )); then
+          echo "Error: Code coverage is below 75%. Please add more tests."
+          exit 1
+        fi
+      working-directory: ./front
+
     - name: Upload frontend coverage report
       uses: actions/upload-artifact@v4
       with:
