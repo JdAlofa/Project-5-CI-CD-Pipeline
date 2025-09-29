@@ -81,8 +81,8 @@ jobs:
           fi
 
           echo "Current coverage is ${COVERAGE}%"
-          if (( $(echo "$COVERAGE < 10" | bc -l) )); then
-            echo "Error: Code coverage is below 10%. Please add more tests."
+          if (( $(echo "$COVERAGE < 80" | bc -l) )); then
+            echo "Error: Code coverage is below 80%. Please add more tests."
             exit 1
           fi
 
