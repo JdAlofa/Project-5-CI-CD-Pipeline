@@ -63,23 +63,20 @@ jobs:
       - name: Enforce minimum coverage
         run: |
           FILE_PATH="front/coverage/bobapp/coverage-summary.json"
-
+          
           echo "--- Debugging Coverage ---"
           echo "Checking for file at: $FILE_PATH"
-
+          
           if [ ! -f "$FILE_PATH" ]; then
             echo "Error: Coverage summary file not found at $FILE_PATH!"
             exit 1
           fi
-
-          echo "File found. Contents:"
-          cat $FILE_PATH
-          echo "--- End of File Contents ---"
-
-          COVERAGE=$(cat $FILE_PATH | grep -o '"lines":{"pct":[^,]*' | grep -o '[0-9.]*')
-
+          
+          # Use jq to safely parse the JSON and get the total line percentage
+          COVERAGE=$(cat $FILE_PATH | jq '.total.lines.pct')
+          
           if [ -z "$COVERAGE" ]; then
-            echo "Error: Could not parse line coverage percentage from JSON file. The 'grep' command found no match."
+            echo "Error: Could not parse line coverage percentage from JSON file using jq."
             exit 1
           fi
 
