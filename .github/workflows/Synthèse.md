@@ -5,13 +5,13 @@ La pipeline est définie dans le fichier `.github/workflows/ci.yml` et s'exécut
 
 ## 1. Workflow CI/CD Général
 
-L'objectif de la pipeline est d'automatiser les tests, l'analyse de qualité du code avec Sonar et la publication des applications front-end et back-end sur docker hub. Elle est composée de plusieurs jobs qui s'exécutent en parallèle pour optimiser le temps d'exécution.
+L'objectif de la pipeline est d'automatiser les tests, l'analyse de qualité du code avec Sonar et la publication des applications front-end et back-end sur docker hub. Elle est composée de plusieurs jobs qui s'exécutent selon un ordre logique pour garantir la qualité avant déploiement.
 
-- **`backend-ci`**: Compile, teste et analyse le code du back-end.
-- **`frontend-ci`**: Installe, teste et vérifie la couverture de code du front-end.
-- **`sonarcloud-frontend`**: Lance l'analyse de qualité SonarCloud pour le front-end (le back-end est analysé durant son propre job).
-- **`build-and-push-backend-on-dockerhub`**: Construit et publie l'image Docker du back-end sur Docker Hub.
-- **`build-and-push-frontend-on-dockerhub`**: Construit et publie l'image Docker du front-end sur Docker Hub.
+**Ordre d'exécution :**
+
+1. **`backend-ci`** et **`frontend-ci`** : S'exécutent en parallèle pour compiler, tester et vérifier la couverture de code.
+2. **`sonarcloud-analysis`** : Lance l'analyse de qualité centralisée pour les deux parties du projet (attend la fin des deux jobs précédents).
+3. **`build-and-push-backend-on-dockerhub`** et **`build-and-push-frontend-on-dockerhub`** : Construisent et publient les images Docker uniquement si l'analyse qualité réussit.
 
 ---
 
@@ -47,18 +47,35 @@ L'objectif est de maintenir un haut niveau de qualité, de sécurité et de main
 1.  **Vérification de la couverture de code (JaCoCo)**:
     - **Objectif**: Forcer un seuil minimum de couverture de code pour l'ensemble du projet back-end.
     - **Étape**: Intégrée à la commande Maven, cette vérification est configurée dans le `pom.xml` pour faire échouer le build si la couverture de lignes est inférieure à 30%.
-2.  **Analyse SonarCloud**:
-    - **Objectif**: Envoyer les résultats des tests, de la couverture et de l'analyse statique du code à SonarCloud pour une analyse approfondie (bugs, vulnérabilités, code smells).
-    - **Étape**: La partie `org.sonarsource.scanner.maven:sonar-maven-plugin:sonar` de la commande Maven s'en charge.
 
-### Front-end (`frontend-ci` et `sonarcloud-frontend`)
+### Front-end (`frontend-ci`)
 
 1.  **`Enforce minimum coverage`**:
     - **Objectif**: Forcer un seuil minimum de couverture de code pour l'ensemble du projet front-end.
     - **Étape**: Ce script lit le fichier `coverage-summary.json` généré par les tests, en extrait le pourcentage de couverture de lignes et fait échouer le job si ce dernier est inférieur à 80%.
-2.  **`SonarCloud Scan`**:
-    - **Objectif**: Envoyer les résultats de l'analyse statique du code et le rapport de couverture à SonarCloud.
-    - **Étape**: Ce job dédié (`sonarcloud-frontend`) s'exécute après les tests et utilise l'action `SonarSource/sonarqube-scan-action` pour effectuer l'envoi.
+
+### Analyse Centralisée (`sonarcloud-analysis`)
+
+**Ce job s'exécute uniquement si `backend-ci` ET `frontend-ci` ont réussi.**
+
+1.  **Préparation de l'environnement**:
+
+    - **Objectif**: Configurer Java et Node.js pour analyser les deux parties du projet.
+    - **Étapes**: Installation de JDK 11 et Node.js 16.
+
+2.  **Re-exécution des tests front-end**:
+
+    - **Objectif**: Régénérer les rapports de couverture nécessaires à SonarCloud (les artefacts des jobs précédents ne sont pas accessibles).
+    - **Étape**: `npm run test -- --code-coverage` dans le dossier front.
+
+3.  **Compilation back-end**:
+
+    - **Objectif**: Préparer les fichiers compilés nécessaires à l'analyse SonarCloud.
+    - **Étape**: `mvn -B compile test-compile` dans le dossier back.
+
+4.  **`SonarCloud Scan`**:
+    - **Objectif**: Envoyer une analyse complète et centralisée du projet (front-end + back-end) à SonarCloud.
+    - **Étape**: Utilise l'action `SonarSource/sonarqube-scan-action` avec un fichier de configuration global qui détecte automatiquement les deux parties du projet.
 
 ---
 
@@ -68,7 +85,7 @@ L'objectif est de "packer" les applications dans des images Docker et de les ren
 
 ### `build-and-push-backend-on-dockerhub`
 
-_Ce job s'exécute uniquement si `backend-ci` a réussi._
+**Ce job s'exécute uniquement si `sonarcloud-analysis` a réussi.**
 
 1.  **`Log in to Docker Hub`**: Se connecte de manière sécurisée à Docker Hub en utilisant un nom d'utilisateur et un token stockés dans les secrets du dépôt GitHub.
 2.  **`Build and push Docker image`**:
@@ -77,7 +94,7 @@ _Ce job s'exécute uniquement si `backend-ci` a réussi._
 
 ### `build-and-push-frontend-on-dockerhub`
 
-_Ce job s'exécute uniquement si `frontend-ci` a réussi._
+**Ce job s'exécute uniquement si `sonarcloud-analysis` a réussi.**
 
 1.  **`Log in to Docker Hub`**: Étape identique à celle du back-end.
 2.  **`Build and push Docker image`**:
@@ -150,9 +167,10 @@ Cette Quality Gate est recommandée par Sonar et se concentre sur le maintien de
 
 #### Intégration dans la Pipeline
 
-- **Back-end** : Analyse intégrée à l'étape `Build, test and analyze with Maven`
-- **Front-end** : Analyse dédiée dans le job `sonarcloud-frontend`
-- **Échec de la pipeline** : Si la Quality Gate échoue, le statut "Failed" est renvoyé à GitHub, empêchant la fusion du code si des règles de protection de branche sont configurées
+- **Analyse centralisée** : Un job unique `sonarcloud-analysis` traite l'ensemble du projet (front-end + back-end)
+- **Ordre d'exécution** : L'analyse SonarCloud s'exécute après la réussite des tests individuels
+- **Déploiement conditionnel** : Les images Docker ne sont publiées que si la Quality Gate SonarCloud passe avec succès
+- **Échec de la pipeline** : Si la Quality Gate échoue, le statut "Failed" est renvoyé à GitHub, empêchant la fusion du code et bloquant le déploiement
 
 ### 5.3 Stratégie Qualité Globale
 
@@ -161,4 +179,3 @@ La combinaison de ces KPI offre une approche à deux niveaux :
 1. **Niveau projet global** : Maintien de la qualité globale via les seuils de couverture personnalisés
 2. **Niveau incrémental** : Garantie de qualité pour chaque contribution via les Quality Gates SonarCloud
 
-Cette stratégie permet d'éviter la dégradation progressive de la qualité tout en n'imposant pas de contraintes trop strictes sur le code existant (legacy).
